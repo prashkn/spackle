@@ -78,8 +78,15 @@
   * {
     border-color: var(--color-border);
   }
+  :host,
+  body {
+    font-family: 'Geist Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+  }
+  code, .font-mono {
+    font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
 }

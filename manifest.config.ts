@@ -28,4 +28,10 @@ export default defineManifest({
     },
   ],
   permissions: ['storage', 'activeTab', 'tabs'],
+  web_accessible_resources: [
+    {
+      resources: ['fonts/*'],
+      matches: ['<all_urls>'],
+    },
+  ],
 })

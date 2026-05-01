@@ -4,7 +4,7 @@ import type { Hit } from './fiber'
 
 const HOVER_EVENT = 'spackle:hover'
 
-const HIGHLIGHT = 'oklch(0.55 0.18 250)'
+const HIGHLIGHT = '#F5F186'
 
 export function Inspect() {
   const [hit, setHit] = useState<Hit | null>(null)
@@ -34,7 +34,7 @@ export function Inspect() {
         }}
       />
       <Badge
-        className="fixed pointer-events-none border-transparent text-white"
+        className="fixed pointer-events-none border-transparent text-black"
         style={{
           top: Math.max(rect.top - 22, 4),
           left: rect.left,
