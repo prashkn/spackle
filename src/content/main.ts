@@ -4,39 +4,17 @@
 // need this split.
 //
 // We send hover hits to the ISOLATED side via a CustomEvent on window. The
-// detail object is structured-cloneable (plain numbers/strings only), so it
-// crosses the world boundary cleanly.
+// detail object is plain serializable values, so it crosses the world boundary
+// cleanly.
 
-import { inspectAt } from './fiber'
+import { inspectAt, type Hit } from './fiber'
 
 const HOST_ID = 'spackle-overlay-host'
 const HOVER_EVENT = 'spackle:hover'
 
-type SerializedHit = {
-  name: string
-  file: string
-  line: number
-  rect: { top: number; left: number; width: number; height: number }
-}
-
 let lastKey: string | null = null
 
-function serializeHit(hit: ReturnType<typeof inspectAt>): SerializedHit | null {
-  if (!hit) return null
-  return {
-    name: hit.name,
-    file: hit.file,
-    line: hit.line,
-    rect: {
-      top: hit.rect.top,
-      left: hit.rect.left,
-      width: hit.rect.width,
-      height: hit.rect.height,
-    },
-  }
-}
-
-function broadcast(detail: SerializedHit | null) {
+function broadcast(detail: Hit | null) {
   window.dispatchEvent(new CustomEvent(HOVER_EVENT, { detail }))
 }
 
@@ -55,7 +33,7 @@ window.addEventListener(
       const key = hit ? `${hit.file}:${hit.line}:${hit.name}` : null
       if (key === null && lastKey === null) return
       lastKey = key
-      broadcast(serializeHit(hit))
+      broadcast(hit)
     } else {
       clearHover()
     }

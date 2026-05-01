@@ -1,50 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { inspectAt, type Hit } from './fiber'
+import type { Hit } from './fiber'
 
-const HOST_ID = 'spackle-overlay-host'
+const HOVER_EVENT = 'spackle:hover'
 
 const HIGHLIGHT = 'oklch(0.55 0.18 250)'
 
 export function Inspect() {
   const [hit, setHit] = useState<Hit | null>(null)
-  const lastKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (e.shiftKey && e.metaKey) {
-        const next = inspectAt(e.clientX, e.clientY, HOST_ID)
-        const key = next ? `${next.file}:${next.line}:${next.name}` : null
-        if (key !== lastKeyRef.current) {
-          lastKeyRef.current = key
-          setHit(next)
-        } else if (next) {
-          // Same component, but rect may have shifted (scroll, layout).
-          setHit(next)
-        }
-      } else if (lastKeyRef.current !== null) {
-        lastKeyRef.current = null
-        setHit(null)
-      }
+    const onHover = (e: Event) => {
+      setHit((e as CustomEvent<Hit | null>).detail)
     }
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Shift' || e.key === 'Meta' || e.key === 'Control') {
-        lastKeyRef.current = null
-        setHit(null)
-      }
-    }
-    const onBlur = () => {
-      lastKeyRef.current = null
-      setHit(null)
-    }
-    window.addEventListener('mousemove', onMove, true)
-    window.addEventListener('keyup', onKeyUp, true)
-    window.addEventListener('blur', onBlur)
-    return () => {
-      window.removeEventListener('mousemove', onMove, true)
-      window.removeEventListener('keyup', onKeyUp, true)
-      window.removeEventListener('blur', onBlur)
-    }
+    window.addEventListener(HOVER_EVENT, onHover)
+    return () => window.removeEventListener(HOVER_EVENT, onHover)
   }, [])
 
   if (!hit) return null

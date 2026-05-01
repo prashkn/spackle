@@ -1,6 +1,5 @@
 import { createRoot } from 'react-dom/client'
 import { ContentApp } from './App'
-import { detectReactDev } from './fiber'
 import overlayCss from '@/styles/globals.css?inline'
 
 const HOST_ID = 'spackle-overlay-host'
@@ -9,12 +8,6 @@ function mount() {
   console.log('[spackle] bootstrap')
   if (document.getElementById(HOST_ID)) {
     console.log('[spackle] already mounted')
-    return
-  }
-  if (!detectReactDev()) {
-    console.log(
-      '[spackle] skipped: no React fibers with resolvable debug location',
-    )
     return
   }
 

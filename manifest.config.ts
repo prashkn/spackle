@@ -20,6 +20,12 @@ export default defineManifest({
       js: ['src/content/index.tsx'],
       run_at: 'document_idle',
     },
+    {
+      matches: ['http://localhost/*', 'http://127.0.0.1/*'],
+      js: ['src/content/main.ts'],
+      run_at: 'document_idle',
+      world: 'MAIN',
+    },
   ],
   permissions: ['storage', 'activeTab', 'tabs'],
 })

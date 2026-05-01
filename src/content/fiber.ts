@@ -19,7 +19,7 @@ export type Hit = {
   name: string
   file: string
   line: number
-  rect: DOMRect
+  rect: { top: number; left: number; width: number; height: number }
 }
 
 const FIBER_KEY_PREFIX = '__reactFiber$'
@@ -170,47 +170,12 @@ export function inspectAt(
   const node = findHostNode(user.fiber)
   if (!node) return null
 
+  const r = node.getBoundingClientRect()
   return {
     name: user.name,
     file: user.file,
     line: user.line,
-    rect: node.getBoundingClientRect(),
+    rect: { top: r.top, left: r.left, width: r.width, height: r.height },
   }
 }
 
-// Detect whether the page is a React app in dev mode (i.e. fibers carry
-// resolvable debug locations). Bounded scan so we don't walk huge pages.
-export function detectReactDev(): boolean {
-  const all = document.body.querySelectorAll('*')
-  const limit = Math.min(all.length, 200)
-  let firstFiber: Fiber | null = null
-  for (let i = 0; i < limit; i++) {
-    const node = all[i]
-    const fiber = getFiberFromNode(node)
-    if (!fiber) continue
-    if (!firstFiber) firstFiber = fiber
-    let f: Fiber | null = fiber
-    while (f) {
-      if (getDebugLocation(f)) return true
-      f = f.return
-    }
-  }
-  if (firstFiber) {
-    const s =
-      firstFiber._debugStack ?? firstFiber.alternate?._debugStack
-    const str =
-      typeof s === 'string'
-        ? s
-        : (s as { stack?: unknown } | undefined)?.stack
-    console.log('[spackle][debug] first fiber type:', firstFiber.type)
-    console.log('[spackle][debug] _debugStack:', s)
-    console.log('[spackle][debug] stack string:', str)
-    console.log(
-      '[spackle][debug] parsed:',
-      typeof str === 'string' ? parseDebugStack(str) : null,
-    )
-  } else {
-    console.log('[spackle][debug] no fiber found on any of first 200 elements')
-  }
-  return false
-}
