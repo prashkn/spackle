@@ -152,6 +152,27 @@ function findHostNode(fiber: Fiber): Element | null {
   return null
 }
 
+export function scanComponents(hostId: string, targetKeys: Set<string>): Hit[] {
+  const seen = new Set<string>()
+  const results: Hit[] = []
+  for (const el of document.querySelectorAll<Element>('*')) {
+    if (el.closest(`#${hostId}`)) continue
+    const fiber = getFiberFromNode(el)
+    if (!fiber) continue
+    const user = findUserComponent(fiber)
+    if (!user) continue
+    const key = `${user.file}:${user.name}`
+    if (!targetKeys.has(key)) continue
+    if (seen.has(key)) continue
+    seen.add(key)
+    const node = findHostNode(user.fiber)
+    if (!node) continue
+    const r = node.getBoundingClientRect()
+    results.push({ name: user.name, file: user.file, line: user.line, rect: { top: r.top, left: r.left, width: r.width, height: r.height } })
+  }
+  return results
+}
+
 export function inspectAt(
   x: number,
   y: number,
