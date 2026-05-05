@@ -152,11 +152,14 @@ function findHostNode(fiber: Fiber): Element | null {
   return null
 }
 
+// Walks every light-DOM element looking for React components whose
+// file:name key is in targetKeys. querySelectorAll does not pierce shadow
+// roots, so the spackle overlay host is never matched — no extra guard needed.
+// Cost: one fiber-tree walk per React DOM node regardless of targetKeys size.
 export function scanComponents(hostId: string, targetKeys: Set<string>): Hit[] {
   const seen = new Set<string>()
   const results: Hit[] = []
   for (const el of document.querySelectorAll<Element>('*')) {
-    if (el.closest(`#${hostId}`)) continue
     const fiber = getFiberFromNode(el)
     if (!fiber) continue
     const user = findUserComponent(fiber)
@@ -168,7 +171,12 @@ export function scanComponents(hostId: string, targetKeys: Set<string>): Hit[] {
     const node = findHostNode(user.fiber)
     if (!node) continue
     const r = node.getBoundingClientRect()
-    results.push({ name: user.name, file: user.file, line: user.line, rect: { top: r.top, left: r.left, width: r.width, height: r.height } })
+    results.push({
+      name: user.name,
+      file: user.file,
+      line: user.line,
+      rect: { top: r.top, left: r.left, width: r.width, height: r.height },
+    })
   }
   return results
 }

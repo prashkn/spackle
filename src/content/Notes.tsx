@@ -1,16 +1,42 @@
 import { useEffect, useRef, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { deleteNote, getNotes, upsertNote, type Note } from '@/lib/storage'
+import {
+  CLICK_EVENT,
+  HOVER_MODE_EVENT,
+  SCAN_REQUEST_EVENT,
+  SCAN_RESULTS_EVENT,
+} from './events'
 import type { Hit } from './fiber'
-
-const HOVER_MODE_EVENT = 'spackle:hover-mode'
-const CLICK_EVENT = 'spackle:click'
-const SCAN_REQUEST_EVENT = 'spackle:scan-request'
-const SCAN_RESULTS_EVENT = 'spackle:scan-results'
 
 type Rect = Hit['rect']
 type PlacementMap = Map<string, Rect>
 type EditState = { noteId: string; draft: string; prevText: string }
+
+// Width bounds for note cards (px). Width scales with the element but is
+// clamped so notes don't become uselessly narrow or comically wide.
+const NOTE_MIN_WIDTH = 140
+const NOTE_MAX_WIDTH = 280
+
+function noteWidth(elementWidth: number): number {
+  return Math.min(Math.max(elementWidth * 0.55, NOTE_MIN_WIDTH), NOTE_MAX_WIDTH)
+}
+
+// Position the note card adjacent to the element — right side first, then
+// left, falling back to an inset overlay when neither side has room.
+function notePosition(
+  rect: Rect,
+  width: number,
+): { top: number; left: number } {
+  const vw = window.innerWidth
+  if (rect.left + rect.width + width + 8 <= vw) {
+    return { top: rect.top, left: rect.left + rect.width + 8 }
+  }
+  if (rect.left - width - 8 >= 0) {
+    return { top: rect.top, left: rect.left - width - 8 }
+  }
+  return { top: rect.top + 4, left: rect.left + 4 }
+}
 
 interface NoteCardProps {
   note: Note
@@ -60,15 +86,16 @@ function NoteCard({
     }
   }
 
-  const noteWidth = Math.min(Math.max(rect.width * 0.55, 140), 280)
+  const width = noteWidth(rect.width)
+  const pos = notePosition(rect, width)
 
   return (
     <div
       style={{
         position: 'fixed',
-        top: rect.top + 4,
-        left: rect.left + 4,
-        width: noteWidth,
+        top: pos.top,
+        left: pos.left,
+        width,
         zIndex: 2147483646,
         borderRadius: 6,
         overflow: 'hidden',
@@ -83,7 +110,7 @@ function NoteCard({
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '3px 6px',
-          background: '#D4C84A',
+          background: '#F5F186',
           fontSize: 11,
           fontFamily: 'Geist Mono, monospace',
           color: '#2A2000',
@@ -150,16 +177,15 @@ function NoteCard({
           style={{
             padding: '6px 8px',
             background: '#FFFDE7',
-            color: note.text ? '#2A2000' : '#9A8A00',
+            color: '#2A2000',
             fontSize: 12,
             fontFamily: 'Geist Sans, sans-serif',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
             minHeight: 40,
-            fontStyle: note.text ? 'normal' : 'italic',
           }}
         >
-          {note.text || 'empty'}
+          {note.text}
         </div>
       )}
     </div>
@@ -173,13 +199,22 @@ export function Notes() {
   const [editState, setEditState] = useState<EditState | null>(null)
 
   const origin = window.location.origin
+  const pathname = window.location.pathname
+
   const notesRef = useRef<Note[]>([])
   notesRef.current = notes
   const editStateRef = useRef<EditState | null>(null)
   editStateRef.current = editState
 
+  function forCurrentPage(all: Note[]): Note[] {
+    return all.filter((n) => n.pathname === pathname)
+  }
+
   useEffect(() => {
-    getNotes(origin).then(setNotes)
+    getNotes(origin)
+      .then(forCurrentPage)
+      .then(setNotes)
+      .catch(console.error)
   }, [origin])
 
   // Re-scan whenever hover mode is active and the notes list changes.
@@ -205,9 +240,15 @@ export function Notes() {
           const note = currentNotes.find((n) => n.id === es.noteId)
           if (note) {
             if (!es.draft.trim()) {
-              deleteNote(origin, es.noteId).then(setNotes)
+              deleteNote(origin, es.noteId)
+                .then(forCurrentPage)
+                .then(setNotes)
+                .catch(console.error)
             } else {
-              upsertNote(origin, { ...note, text: es.draft }).then(setNotes)
+              upsertNote(origin, { ...note, text: es.draft })
+                .then(forCurrentPage)
+                .then(setNotes)
+                .catch(console.error)
             }
           }
           setEditState(null)
@@ -241,20 +282,24 @@ export function Notes() {
           prevText: existing.text,
         })
       } else {
-        const newNote: Note = {
-          id: crypto.randomUUID(),
-          pathname: window.location.pathname,
-          componentFile: hit.file,
-          componentLine: hit.line,
-          componentName: hit.name,
-          text: '',
-          createdAt: Date.now(),
+        try {
+          const newNote: Note = {
+            id: crypto.randomUUID(),
+            pathname,
+            componentFile: hit.file,
+            componentLine: hit.line,
+            componentName: hit.name,
+            text: '',
+            createdAt: Date.now(),
+          }
+          const updated = await upsertNote(origin, newNote)
+          setNotes(forCurrentPage(updated))
+          setEditState({ noteId: newNote.id, draft: '', prevText: '' })
+          // Show the card immediately at the clicked rect while scan catches up.
+          setPlacements((prev) => new Map(prev).set(key, hit.rect))
+        } catch (err) {
+          console.error('[spackle] failed to create note', err)
         }
-        const updated = await upsertNote(origin, newNote)
-        setNotes(updated)
-        setEditState({ noteId: newNote.id, draft: '', prevText: '' })
-        // Immediately show the card at the clicked rect while scan catches up.
-        setPlacements((prev) => new Map(prev).set(key, hit.rect))
       }
     }
 
@@ -271,26 +316,34 @@ export function Notes() {
   async function handleSave(noteId: string, draft: string) {
     const note = notesRef.current.find((n) => n.id === noteId)
     if (!note) return
-    if (!draft.trim()) {
-      const updated = await deleteNote(origin, noteId)
-      setNotes(updated)
-    } else {
-      const updated = await upsertNote(origin, { ...note, text: draft })
-      setNotes(updated)
+    try {
+      if (!draft.trim()) {
+        setNotes(forCurrentPage(await deleteNote(origin, noteId)))
+      } else {
+        setNotes(forCurrentPage(await upsertNote(origin, { ...note, text: draft })))
+      }
+    } catch (err) {
+      console.error('[spackle] failed to save note', err)
     }
     setEditState(null)
   }
 
   async function handleDelete(noteId: string) {
-    const updated = await deleteNote(origin, noteId)
-    setNotes(updated)
-    if (editState?.noteId === noteId) setEditState(null)
+    try {
+      setNotes(forCurrentPage(await deleteNote(origin, noteId)))
+    } catch (err) {
+      console.error('[spackle] failed to delete note', err)
+    }
+    if (editStateRef.current?.noteId === noteId) setEditState(null)
   }
 
   function handleCancel(noteId: string, prevText: string) {
     if (!prevText) {
       // New note abandoned — remove it from storage.
-      deleteNote(origin, noteId).then(setNotes)
+      deleteNote(origin, noteId)
+        .then(forCurrentPage)
+        .then(setNotes)
+        .catch(console.error)
     }
     setEditState(null)
   }
@@ -314,7 +367,10 @@ export function Notes() {
               setEditState((es) => (es ? { ...es, draft } : null))
             }
             onSave={() =>
-              handleSave(note.id, isEditing ? editState!.draft : note.text)
+              handleSave(
+                note.id,
+                editStateRef.current?.draft ?? note.text,
+              )
             }
             onCancel={() =>
               handleCancel(

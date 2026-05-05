@@ -8,13 +8,15 @@
 // cleanly.
 
 import { inspectAt, scanComponents, type Hit } from './fiber'
+import {
+  CLICK_EVENT,
+  HOVER_EVENT,
+  HOVER_MODE_EVENT,
+  SCAN_REQUEST_EVENT,
+  SCAN_RESULTS_EVENT,
+} from './events'
 
 const HOST_ID = 'spackle-overlay-host'
-const HOVER_EVENT = 'spackle:hover'
-const HOVER_MODE_EVENT = 'spackle:hover-mode'
-const CLICK_EVENT = 'spackle:click'
-const SCAN_REQUEST_EVENT = 'spackle:scan-request'
-const SCAN_RESULTS_EVENT = 'spackle:scan-results'
 
 let lastKey: string | null = null
 let hoverModeActive = false
