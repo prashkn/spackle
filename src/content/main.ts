@@ -7,7 +7,7 @@
 // detail object is plain serializable values, so it crosses the world boundary
 // cleanly.
 
-import { inspectAt, scanComponents, type Hit } from './fiber'
+import { componentKey, inspectAt, scanComponents, type Hit } from './fiber'
 import {
   CLICK_EVENT,
   HOVER_EVENT,
@@ -72,8 +72,8 @@ window.addEventListener(SCAN_REQUEST_EVENT, (e: Event) => {
   const { components } = (
     e as CustomEvent<{ components: Array<{ file: string; name: string }> }>
   ).detail
-  const keys = new Set(components.map((c) => `${c.file}:${c.name}`))
-  const results = scanComponents(HOST_ID, keys)
+  const keys = new Set(components.map((c) => componentKey(c.file, c.name)))
+  const results = scanComponents(keys)
   window.dispatchEvent(new CustomEvent(SCAN_RESULTS_EVENT, { detail: results }))
 })
 

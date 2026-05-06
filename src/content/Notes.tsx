@@ -1,17 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { Trash2 } from 'lucide-react'
-import { deleteNote, getNotes, upsertNote, type Note } from '@/lib/storage'
-import {
-  CLICK_EVENT,
-  HOVER_MODE_EVENT,
-  SCAN_REQUEST_EVENT,
-  SCAN_RESULTS_EVENT,
-} from './events'
-import type { Hit } from './fiber'
+import type { Note } from '@/lib/storage'
+import { componentKey, type Hit } from './fiber'
+import { useNotes } from './useNotes'
 
 type Rect = Hit['rect']
-type PlacementMap = Map<string, Rect>
-type EditState = { noteId: string; draft: string; prevText: string }
 
 // Width bounds for note cards (px). Width scales with the element but is
 // clamped so notes don't become uselessly narrow or comically wide.
@@ -41,7 +34,8 @@ function notePosition(
 interface NoteCardProps {
   note: Note
   rect: Rect
-  editState: EditState | null
+  /** null = display mode; string = the current draft being edited */
+  draft: string | null
   onDraftChange: (text: string) => void
   onSave: () => void
   onCancel: () => void
@@ -51,16 +45,16 @@ interface NoteCardProps {
 function NoteCard({
   note,
   rect,
-  editState,
+  draft,
   onDraftChange,
   onSave,
   onCancel,
   onDelete,
 }: NoteCardProps) {
-  const isEditing = editState !== null
-  const draft = editState?.draft ?? note.text
+  const isEditing = draft !== null
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Focus and move cursor to end when entering edit mode.
   useEffect(() => {
     if (isEditing && textareaRef.current) {
       textareaRef.current.focus()
@@ -69,6 +63,7 @@ function NoteCard({
     }
   }, [isEditing])
 
+  // Auto-resize textarea to fit content.
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
@@ -149,7 +144,7 @@ function NoteCard({
         </button>
       </div>
 
-      {isEditing ? (
+      {draft !== null ? (
         <textarea
           ref={textareaRef}
           value={draft}
@@ -193,191 +188,36 @@ function NoteCard({
 }
 
 export function Notes() {
-  const [hoverMode, setHoverMode] = useState(false)
-  const [notes, setNotes] = useState<Note[]>([])
-  const [placements, setPlacements] = useState<PlacementMap>(new Map())
-  const [editState, setEditState] = useState<EditState | null>(null)
-
-  const origin = window.location.origin
-  const pathname = window.location.pathname
-
-  const notesRef = useRef<Note[]>([])
-  notesRef.current = notes
-  const editStateRef = useRef<EditState | null>(null)
-  editStateRef.current = editState
-
-  function forCurrentPage(all: Note[]): Note[] {
-    return all.filter((n) => n.pathname === pathname)
-  }
-
-  useEffect(() => {
-    getNotes(origin)
-      .then(forCurrentPage)
-      .then(setNotes)
-      .catch(console.error)
-  }, [origin])
-
-  // Re-scan whenever hover mode is active and the notes list changes.
-  useEffect(() => {
-    if (!hoverMode || notes.length === 0) return
-    const components = notes.map((n) => ({
-      file: n.componentFile,
-      name: n.componentName,
-    }))
-    window.dispatchEvent(
-      new CustomEvent(SCAN_REQUEST_EVENT, { detail: { components } }),
-    )
-  }, [hoverMode, notes])
-
-  useEffect(() => {
-    const onHoverMode = (e: Event) => {
-      const active = (e as CustomEvent<boolean>).detail
-      if (!active) {
-        // Auto-save any in-progress edit before hover mode closes.
-        const es = editStateRef.current
-        const currentNotes = notesRef.current
-        if (es) {
-          const note = currentNotes.find((n) => n.id === es.noteId)
-          if (note) {
-            if (!es.draft.trim()) {
-              deleteNote(origin, es.noteId)
-                .then(forCurrentPage)
-                .then(setNotes)
-                .catch(console.error)
-            } else {
-              upsertNote(origin, { ...note, text: es.draft })
-                .then(forCurrentPage)
-                .then(setNotes)
-                .catch(console.error)
-            }
-          }
-          setEditState(null)
-        }
-        setPlacements(new Map())
-      }
-      setHoverMode(active)
-    }
-
-    const onScanResults = (e: Event) => {
-      const hits = (e as CustomEvent<Hit[]>).detail
-      const map: PlacementMap = new Map()
-      for (const hit of hits) {
-        map.set(`${hit.file}:${hit.name}`, hit.rect)
-      }
-      setPlacements(map)
-    }
-
-    const onClick = async (e: Event) => {
-      const hit = (e as CustomEvent<Hit | null>).detail
-      if (!hit) return
-      const key = `${hit.file}:${hit.name}`
-      const currentNotes = notesRef.current
-      const existing = currentNotes.find(
-        (n) => n.componentFile === hit.file && n.componentName === hit.name,
-      )
-      if (existing) {
-        setEditState({
-          noteId: existing.id,
-          draft: existing.text,
-          prevText: existing.text,
-        })
-      } else {
-        try {
-          const newNote: Note = {
-            id: crypto.randomUUID(),
-            pathname,
-            componentFile: hit.file,
-            componentLine: hit.line,
-            componentName: hit.name,
-            text: '',
-            createdAt: Date.now(),
-          }
-          const updated = await upsertNote(origin, newNote)
-          setNotes(forCurrentPage(updated))
-          setEditState({ noteId: newNote.id, draft: '', prevText: '' })
-          // Show the card immediately at the clicked rect while scan catches up.
-          setPlacements((prev) => new Map(prev).set(key, hit.rect))
-        } catch (err) {
-          console.error('[spackle] failed to create note', err)
-        }
-      }
-    }
-
-    window.addEventListener(HOVER_MODE_EVENT, onHoverMode)
-    window.addEventListener(SCAN_RESULTS_EVENT, onScanResults)
-    window.addEventListener(CLICK_EVENT, onClick)
-    return () => {
-      window.removeEventListener(HOVER_MODE_EVENT, onHoverMode)
-      window.removeEventListener(SCAN_RESULTS_EVENT, onScanResults)
-      window.removeEventListener(CLICK_EVENT, onClick)
-    }
-  }, [origin])
-
-  async function handleSave(noteId: string, draft: string) {
-    const note = notesRef.current.find((n) => n.id === noteId)
-    if (!note) return
-    try {
-      if (!draft.trim()) {
-        setNotes(forCurrentPage(await deleteNote(origin, noteId)))
-      } else {
-        setNotes(forCurrentPage(await upsertNote(origin, { ...note, text: draft })))
-      }
-    } catch (err) {
-      console.error('[spackle] failed to save note', err)
-    }
-    setEditState(null)
-  }
-
-  async function handleDelete(noteId: string) {
-    try {
-      setNotes(forCurrentPage(await deleteNote(origin, noteId)))
-    } catch (err) {
-      console.error('[spackle] failed to delete note', err)
-    }
-    if (editStateRef.current?.noteId === noteId) setEditState(null)
-  }
-
-  function handleCancel(noteId: string, prevText: string) {
-    if (!prevText) {
-      // New note abandoned — remove it from storage.
-      deleteNote(origin, noteId)
-        .then(forCurrentPage)
-        .then(setNotes)
-        .catch(console.error)
-    }
-    setEditState(null)
-  }
+  const {
+    hoverMode,
+    notes,
+    placements,
+    editState,
+    handleSave,
+    handleDelete,
+    handleCancel,
+    handleDraftChange,
+  } = useNotes()
 
   if (!hoverMode) return null
 
   return (
     <>
       {notes.map((note) => {
-        const key = `${note.componentFile}:${note.componentName}`
-        const rect = placements.get(key)
+        const rect = placements.get(
+          componentKey(note.componentFile, note.componentName),
+        )
         if (!rect) return null
-        const isEditing = editState?.noteId === note.id
+        const draft = editState?.noteId === note.id ? editState.draft : null
         return (
           <NoteCard
             key={note.id}
             note={note}
             rect={rect}
-            editState={isEditing ? editState : null}
-            onDraftChange={(draft) =>
-              setEditState((es) => (es ? { ...es, draft } : null))
-            }
-            onSave={() =>
-              handleSave(
-                note.id,
-                editStateRef.current?.draft ?? note.text,
-              )
-            }
-            onCancel={() =>
-              handleCancel(
-                note.id,
-                isEditing ? editState!.prevText : note.text,
-              )
-            }
+            draft={draft}
+            onDraftChange={handleDraftChange}
+            onSave={handleSave}
+            onCancel={handleCancel}
             onDelete={() => handleDelete(note.id)}
           />
         )
