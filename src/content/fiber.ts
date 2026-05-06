@@ -22,6 +22,11 @@ export type Hit = {
   rect: { top: number; left: number; width: number; height: number }
 }
 
+/** Stable key identifying a component across fiber, storage, and UI. */
+export function componentKey(file: string, name: string): string {
+  return `${file}:${name}`
+}
+
 const FIBER_KEY_PREFIX = '__reactFiber$'
 
 const REACT_INTERNAL_PATTERNS = [
@@ -150,6 +155,35 @@ function findHostNode(fiber: Fiber): Element | null {
     f = f.sibling
   }
   return null
+}
+
+// Walks every light-DOM element looking for React components whose key is in
+// targetKeys. querySelectorAll does not pierce shadow roots, so the spackle
+// overlay host is never matched — no guard needed.
+// Cost: one fiber-tree walk per React DOM node regardless of targetKeys size.
+export function scanComponents(targetKeys: Set<string>): Hit[] {
+  const seen = new Set<string>()
+  const results: Hit[] = []
+  for (const el of document.querySelectorAll<Element>('*')) {
+    const fiber = getFiberFromNode(el)
+    if (!fiber) continue
+    const user = findUserComponent(fiber)
+    if (!user) continue
+    const key = componentKey(user.file, user.name)
+    if (!targetKeys.has(key)) continue
+    if (seen.has(key)) continue
+    seen.add(key)
+    const node = findHostNode(user.fiber)
+    if (!node) continue
+    const r = node.getBoundingClientRect()
+    results.push({
+      name: user.name,
+      file: user.file,
+      line: user.line,
+      rect: { top: r.top, left: r.left, width: r.width, height: r.height },
+    })
+  }
+  return results
 }
 
 export function inspectAt(

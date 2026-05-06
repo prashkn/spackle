@@ -7,18 +7,32 @@
 // detail object is plain serializable values, so it crosses the world boundary
 // cleanly.
 
-import { inspectAt, type Hit } from './fiber'
+import { componentKey, inspectAt, scanComponents, type Hit } from './fiber'
+import {
+  CLICK_EVENT,
+  HOVER_EVENT,
+  HOVER_MODE_EVENT,
+  SCAN_REQUEST_EVENT,
+  SCAN_RESULTS_EVENT,
+} from './events'
 
 const HOST_ID = 'spackle-overlay-host'
-const HOVER_EVENT = 'spackle:hover'
 
 let lastKey: string | null = null
+let hoverModeActive = false
 
 function broadcast(detail: Hit | null) {
   window.dispatchEvent(new CustomEvent(HOVER_EVENT, { detail }))
 }
 
+function setHoverMode(active: boolean) {
+  if (hoverModeActive === active) return
+  hoverModeActive = active
+  window.dispatchEvent(new CustomEvent(HOVER_MODE_EVENT, { detail: active }))
+}
+
 function clearHover() {
+  setHoverMode(false)
   if (lastKey !== null) {
     lastKey = null
     broadcast(null)
@@ -29,6 +43,7 @@ window.addEventListener(
   'mousemove',
   (e: MouseEvent) => {
     if (e.shiftKey && e.metaKey) {
+      setHoverMode(true)
       const hit = inspectAt(e.clientX, e.clientY, HOST_ID)
       const key = hit ? `${hit.file}:${hit.line}:${hit.name}` : null
       if (key === null && lastKey === null) return
@@ -40,6 +55,27 @@ window.addEventListener(
   },
   true,
 )
+
+window.addEventListener(
+  'click',
+  (e: MouseEvent) => {
+    if (!e.shiftKey || !e.metaKey) return
+    e.preventDefault()
+    e.stopPropagation()
+    const hit = inspectAt(e.clientX, e.clientY, HOST_ID)
+    window.dispatchEvent(new CustomEvent(CLICK_EVENT, { detail: hit }))
+  },
+  true,
+)
+
+window.addEventListener(SCAN_REQUEST_EVENT, (e: Event) => {
+  const { components } = (
+    e as CustomEvent<{ components: Array<{ file: string; name: string }> }>
+  ).detail
+  const keys = new Set(components.map((c) => componentKey(c.file, c.name)))
+  const results = scanComponents(keys)
+  window.dispatchEvent(new CustomEvent(SCAN_RESULTS_EVENT, { detail: results }))
+})
 
 window.addEventListener(
   'keyup',

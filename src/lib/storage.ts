@@ -34,6 +34,7 @@ export async function upsertNote(
   const notes = await getNotes(origin)
   const idx = notes.findIndex(
     (n) =>
+      n.pathname === next.pathname &&
       n.componentFile === next.componentFile &&
       n.componentName === next.componentName,
   )
@@ -58,12 +59,15 @@ export async function clearNotes(origin: string): Promise<void> {
 
 export async function findNoteForComponent(
   origin: string,
+  pathname: string,
   componentFile: string,
   componentName: string,
 ): Promise<Note | undefined> {
   const notes = await getNotes(origin)
   return notes.find(
     (n) =>
-      n.componentFile === componentFile && n.componentName === componentName,
+      n.pathname === pathname &&
+      n.componentFile === componentFile &&
+      n.componentName === componentName,
   )
 }
