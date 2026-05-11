@@ -4,6 +4,12 @@
 
 Spackle is a Chrome extension that lets you drop sticky notes anywhere on a webpage to flag UI issues — a misaligned button, a wrong color, a hover state that doesn't quite work — and then bundles every note on the page into a single, well-formed prompt you can paste into Claude for a one-shot fix.
 
+
+https://github.com/user-attachments/assets/b984a429-13c9-4dc4-a9a9-8a77ad642619
+
+
+
+
 ## The problem
 
 When you're reviewing a UI, you can *see* what's wrong in seconds. Describing it in words is the slow part:
