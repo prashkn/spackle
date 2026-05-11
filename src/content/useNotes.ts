@@ -57,7 +57,7 @@ function reducer(state: State, action: Action): State {
     case 'SCAN_RESULTS': {
       const placements: PlacementMap = new Map()
       for (const hit of action.hits) {
-        placements.set(componentKey(hit.file, hit.name), hit.rect)
+        placements.set(componentKey(hit.file, hit.line, hit.name), hit.rect)
       }
       return { ...state, placements }
     }
@@ -75,7 +75,11 @@ function reducer(state: State, action: Action): State {
     case 'NOTE_CREATED': {
       const placements = new Map(state.placements)
       placements.set(
-        componentKey(action.note.componentFile, action.note.componentName),
+        componentKey(
+          action.note.componentFile,
+          action.note.componentLine,
+          action.note.componentName,
+        ),
         action.rect,
       )
       return {
@@ -162,6 +166,7 @@ export function useNotes() {
         detail: {
           components: state.notes.map((n) => ({
             file: n.componentFile,
+            line: n.componentLine,
             name: n.componentName,
           })),
         },
@@ -176,6 +181,7 @@ export function useNotes() {
 
     const components = state.notes.map((n) => ({
       file: n.componentFile,
+      line: n.componentLine,
       name: n.componentName,
     }))
     const requestScan = () => {
@@ -249,7 +255,10 @@ export function useNotes() {
 
       const { notes } = stateRef.current
       const existing = notes.find(
-        (n) => n.componentFile === hit.file && n.componentName === hit.name,
+        (n) =>
+          n.componentFile === hit.file &&
+          n.componentLine === hit.line &&
+          n.componentName === hit.name,
       )
 
       if (existing) {

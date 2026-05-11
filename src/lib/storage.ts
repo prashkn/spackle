@@ -36,6 +36,7 @@ export async function upsertNote(
     (n) =>
       n.pathname === next.pathname &&
       n.componentFile === next.componentFile &&
+      n.componentLine === next.componentLine &&
       n.componentName === next.componentName,
   )
   if (idx >= 0) notes[idx] = next
@@ -61,6 +62,7 @@ export async function findNoteForComponent(
   origin: string,
   pathname: string,
   componentFile: string,
+  componentLine: number,
   componentName: string,
 ): Promise<Note | undefined> {
   const notes = await getNotes(origin)
@@ -68,6 +70,7 @@ export async function findNoteForComponent(
     (n) =>
       n.pathname === pathname &&
       n.componentFile === componentFile &&
+      n.componentLine === componentLine &&
       n.componentName === componentName,
   )
 }

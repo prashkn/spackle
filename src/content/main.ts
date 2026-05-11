@@ -70,9 +70,13 @@ window.addEventListener(
 
 window.addEventListener(SCAN_REQUEST_EVENT, (e: Event) => {
   const { components } = (
-    e as CustomEvent<{ components: Array<{ file: string; name: string }> }>
+    e as CustomEvent<{
+      components: Array<{ file: string; line: number; name: string }>
+    }>
   ).detail
-  const keys = new Set(components.map((c) => componentKey(c.file, c.name)))
+  const keys = new Set(
+    components.map((c) => componentKey(c.file, c.line, c.name)),
+  )
   const results = scanComponents(keys)
   window.dispatchEvent(new CustomEvent(SCAN_RESULTS_EVENT, { detail: results }))
 })

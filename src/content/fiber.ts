@@ -22,9 +22,15 @@ export type Hit = {
   rect: { top: number; left: number; width: number; height: number }
 }
 
-/** Stable key identifying a component across fiber, storage, and UI. */
-export function componentKey(file: string, name: string): string {
-  return `${file}:${name}`
+/** Stable key identifying an attachable target (component or host element)
+ *  across fiber, storage, and UI. Line is included so multiple host elements
+ *  with the same tag inside the same file (e.g. two `<a>`s) are distinct. */
+export function componentKey(
+  file: string,
+  line: number,
+  name: string,
+): string {
+  return `${file}:${line}:${name}`
 }
 
 const FIBER_KEY_PREFIX = '__reactFiber$'
@@ -126,7 +132,15 @@ function getComponentName(type: unknown): string | null {
   return null
 }
 
-function findUserComponent(fiber: Fiber | null): {
+function getFiberName(type: unknown): string | null {
+  if (typeof type === 'string') return type
+  return getComponentName(type)
+}
+
+/** Walk up the fiber tree to the nearest fiber with a parseable debug
+ *  location. Includes host fibers (`<a>`, `<h3>`, …) so notes can attach to
+ *  individual JSX call sites, not just user-defined components. */
+function findNearestTarget(fiber: Fiber | null): {
   fiber: Fiber
   name: string
   file: string
@@ -134,9 +148,9 @@ function findUserComponent(fiber: Fiber | null): {
 } | null {
   let f = fiber
   while (f) {
-    if (typeof f.type !== 'string' && f.type) {
+    if (f.type) {
       const loc = getDebugLocation(f)
-      const name = getComponentName(f.type)
+      const name = getFiberName(f.type)
       if (loc && name) {
         return { fiber: f, name, file: loc.file, line: loc.line }
       }
@@ -157,7 +171,7 @@ function findHostNode(fiber: Fiber): Element | null {
   return null
 }
 
-// Walks every light-DOM element looking for React components whose key is in
+// Walks every light-DOM element looking for attachable targets whose key is in
 // targetKeys. querySelectorAll does not pierce shadow roots, so the spackle
 // overlay host is never matched — no guard needed.
 // Cost: one fiber-tree walk per React DOM node regardless of targetKeys size.
@@ -167,19 +181,19 @@ export function scanComponents(targetKeys: Set<string>): Hit[] {
   for (const el of document.querySelectorAll<Element>('*')) {
     const fiber = getFiberFromNode(el)
     if (!fiber) continue
-    const user = findUserComponent(fiber)
-    if (!user) continue
-    const key = componentKey(user.file, user.name)
+    const target = findNearestTarget(fiber)
+    if (!target) continue
+    const key = componentKey(target.file, target.line, target.name)
     if (!targetKeys.has(key)) continue
     if (seen.has(key)) continue
     seen.add(key)
-    const node = findHostNode(user.fiber)
+    const node = findHostNode(target.fiber)
     if (!node) continue
     const r = node.getBoundingClientRect()
     results.push({
-      name: user.name,
-      file: user.file,
-      line: user.line,
+      name: target.name,
+      file: target.file,
+      line: target.line,
       rect: { top: r.top, left: r.left, width: r.width, height: r.height },
     })
   }
@@ -198,17 +212,17 @@ export function inspectAt(
   const fiber = getFiberFromNode(el)
   if (!fiber) return null
 
-  const user = findUserComponent(fiber)
-  if (!user) return null
+  const target = findNearestTarget(fiber)
+  if (!target) return null
 
-  const node = findHostNode(user.fiber)
+  const node = findHostNode(target.fiber)
   if (!node) return null
 
   const r = node.getBoundingClientRect()
   return {
-    name: user.name,
-    file: user.file,
-    line: user.line,
+    name: target.name,
+    file: target.file,
+    line: target.line,
     rect: { top: r.top, left: r.left, width: r.width, height: r.height },
   }
 }

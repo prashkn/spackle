@@ -202,7 +202,11 @@ export function Notes() {
     <>
       {notes.map((note) => {
         const rect = placements.get(
-          componentKey(note.componentFile, note.componentName),
+          componentKey(
+            note.componentFile,
+            note.componentLine,
+            note.componentName,
+          ),
         )
         if (!rect) return null
         const draft = editState?.noteId === note.id ? editState.draft : null
