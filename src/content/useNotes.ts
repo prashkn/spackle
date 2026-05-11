@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef } from 'react'
 import { deleteNote, getNotes, upsertNote, type Note } from '@/lib/storage'
+import type { Message } from '@/lib/messages'
 import {
   CLICK_EVENT,
   HOVER_MODE_EVENT,
@@ -7,6 +8,8 @@ import {
   SCAN_RESULTS_EVENT,
 } from './events'
 import { componentKey, type Hit } from './fiber'
+
+const HOST_ID = 'spackle-overlay-host'
 
 type Rect = Hit['rect']
 export type PlacementMap = Map<string, Rect>
@@ -27,7 +30,7 @@ type Action =
   | { type: 'EDIT_OPEN'; note: Note }
   | { type: 'NOTE_CREATED'; note: Note; notes: Note[]; rect: Rect }
   | { type: 'DRAFT_CHANGED'; draft: string }
-  | { type: 'SAVE_DONE'; notes: Note[] }
+  | { type: 'SAVE_DONE'; noteId: string; notes: Note[] }
   | { type: 'SAVE_FAILED' }
   | { type: 'CANCEL_EDIT' }
   | { type: 'DELETE_DONE'; noteId: string; notes: Note[] }
@@ -46,8 +49,7 @@ function reducer(state: State, action: Action): State {
       return { ...state, hoverMode: true }
 
     case 'HOVER_OFF':
-      // editState auto-saved externally before this action is dispatched.
-      return { ...state, hoverMode: false, placements: new Map(), editState: null }
+      return { ...state, hoverMode: false }
 
     case 'NOTES_LOADED':
       return { ...state, notes: action.notes }
@@ -88,8 +90,13 @@ function reducer(state: State, action: Action): State {
       if (!state.editState) return state
       return { ...state, editState: { ...state.editState, draft: action.draft } }
 
-    case 'SAVE_DONE':
-      return { ...state, notes: action.notes, editState: null }
+    case 'SAVE_DONE': {
+      // Only close the edit if it's still the same note. If the user opened
+      // edit on another note while this save was in flight, leave it alone.
+      const editState =
+        state.editState?.noteId === action.noteId ? null : state.editState
+      return { ...state, notes: action.notes, editState }
+    }
 
     case 'SAVE_FAILED':
       // Keep edit state open so the user can retry.
@@ -145,11 +152,11 @@ export function useNotes() {
       .catch(console.error)
   }, [origin])
 
-  // Re-trigger DOM scan whenever hover mode is active and notes change.
-  // spackle:scan-request → main world → spackle:scan-results is synchronous,
-  // so SCAN_RESULTS will be dispatched within the same task.
+  // Re-trigger DOM scan whenever the notes list changes (initial load, create,
+  // delete). spackle:scan-request → main world → spackle:scan-results is
+  // synchronous, so SCAN_RESULTS will be dispatched within the same task.
   useEffect(() => {
-    if (!state.hoverMode || state.notes.length === 0) return
+    if (state.notes.length === 0) return
     window.dispatchEvent(
       new CustomEvent(SCAN_REQUEST_EVENT, {
         detail: {
@@ -160,28 +167,72 @@ export function useNotes() {
         },
       }),
     )
-  }, [state.hoverMode, state.notes])
+  }, [state.notes])
+
+  // Keep placements fresh as the page moves. Scroll uses rAF to coalesce; resize
+  // is debounced. Both early-return when there are no notes to avoid a tree walk.
+  useEffect(() => {
+    if (state.notes.length === 0) return
+
+    const components = state.notes.map((n) => ({
+      file: n.componentFile,
+      name: n.componentName,
+    }))
+    const requestScan = () => {
+      window.dispatchEvent(
+        new CustomEvent(SCAN_REQUEST_EVENT, { detail: { components } }),
+      )
+    }
+
+    let rafId: number | null = null
+    const onScroll = () => {
+      if (rafId !== null) return
+      rafId = requestAnimationFrame(() => {
+        rafId = null
+        requestScan()
+      })
+    }
+
+    let resizeTimer: number | null = null
+    const onResize = () => {
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer)
+      resizeTimer = window.setTimeout(requestScan, 100)
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true, capture: true })
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('scroll', onScroll, { capture: true })
+      window.removeEventListener('resize', onResize)
+      if (rafId !== null) cancelAnimationFrame(rafId)
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer)
+    }
+  }, [state.notes])
+
+  // Persist the current draft and dispatch SAVE_DONE. Empty drafts delete the
+  // note. Used by Enter-to-save and by outside-click-to-save below.
+  async function persistEdit(es: EditState) {
+    const note = stateRef.current.notes.find((n) => n.id === es.noteId)
+    if (!note) return
+    try {
+      const op = es.draft.trim()
+        ? upsertNote(origin, { ...note, text: es.draft })
+        : deleteNote(origin, es.noteId)
+      dispatch({
+        type: 'SAVE_DONE',
+        noteId: es.noteId,
+        notes: forCurrentPage(await op),
+      })
+    } catch (err) {
+      console.error('[spackle] failed to save note', err)
+      dispatch({ type: 'SAVE_FAILED' }) // edit state preserved; user can retry
+    }
+  }
 
   // Window-event wiring (registered once; uses stateRef for current state).
   useEffect(() => {
     const onHoverMode = (e: Event) => {
       const active = (e as CustomEvent<boolean>).detail
-      if (!active) {
-        // Auto-save any in-progress edit before the UI closes.
-        const { editState, notes } = stateRef.current
-        if (editState) {
-          const note = notes.find((n) => n.id === editState.noteId)
-          if (note) {
-            const op = editState.draft.trim()
-              ? upsertNote(origin, { ...note, text: editState.draft })
-              : deleteNote(origin, editState.noteId)
-            op
-              .then(forCurrentPage)
-              .then((notes) => dispatch({ type: 'NOTES_LOADED', notes }))
-              .catch(console.error)
-          }
-        }
-      }
       dispatch({ type: active ? 'HOVER_ON' : 'HOVER_OFF' })
     }
 
@@ -228,30 +279,42 @@ export function useNotes() {
       }
     }
 
+    // Save the in-progress edit when the user clicks anywhere outside the
+    // shadow overlay. mousedown (not click) so the card's onClick stopPropagation
+    // doesn't matter, and capture phase so we run before any host-page handler.
+    const onOutsideMouseDown = (e: MouseEvent) => {
+      const es = stateRef.current.editState
+      if (!es) return
+      for (const node of e.composedPath()) {
+        if ((node as Element).id === HOST_ID) return
+      }
+      void persistEdit(es)
+    }
+
+    const onRuntimeMessage = (msg: Message) => {
+      if (msg?.type === 'CLEAR_ALL') {
+        dispatch({ type: 'NOTES_LOADED', notes: [] })
+      }
+    }
+
     window.addEventListener(HOVER_MODE_EVENT, onHoverMode)
     window.addEventListener(SCAN_RESULTS_EVENT, onScanResults)
     window.addEventListener(CLICK_EVENT, onClick)
+    window.addEventListener('mousedown', onOutsideMouseDown, true)
+    chrome.runtime.onMessage.addListener(onRuntimeMessage)
     return () => {
       window.removeEventListener(HOVER_MODE_EVENT, onHoverMode)
       window.removeEventListener(SCAN_RESULTS_EVENT, onScanResults)
       window.removeEventListener(CLICK_EVENT, onClick)
+      window.removeEventListener('mousedown', onOutsideMouseDown, true)
+      chrome.runtime.onMessage.removeListener(onRuntimeMessage)
     }
   }, [origin])
 
   async function handleSave() {
-    const { editState, notes } = stateRef.current
+    const { editState } = stateRef.current
     if (!editState) return
-    const note = notes.find((n) => n.id === editState.noteId)
-    if (!note) return
-    try {
-      const op = editState.draft.trim()
-        ? upsertNote(origin, { ...note, text: editState.draft })
-        : deleteNote(origin, editState.noteId)
-      dispatch({ type: 'SAVE_DONE', notes: forCurrentPage(await op) })
-    } catch (err) {
-      console.error('[spackle] failed to save note', err)
-      dispatch({ type: 'SAVE_FAILED' }) // edit state preserved; user can retry
-    }
+    await persistEdit(editState)
   }
 
   async function handleDelete(noteId: string) {
@@ -282,7 +345,6 @@ export function useNotes() {
   }
 
   return {
-    hoverMode: state.hoverMode,
     notes: state.notes,
     placements: state.placements,
     editState: state.editState,

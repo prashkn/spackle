@@ -189,7 +189,6 @@ function NoteCard({
 
 export function Notes() {
   const {
-    hoverMode,
     notes,
     placements,
     editState,
@@ -198,8 +197,6 @@ export function Notes() {
     handleCancel,
     handleDraftChange,
   } = useNotes()
-
-  if (!hoverMode) return null
 
   return (
     <>
